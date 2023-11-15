@@ -7,11 +7,12 @@ on:
 env:
   REGISTRY: ghcr.io/vipulagarwal
   APP_IMAGE_NAME: vipulagarwal/audito-maldito
+  APP_IMAGE_REF: ${{ github.ref_name }}
 
 jobs:
   auto-release:
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
@@ -72,7 +73,7 @@ jobs:
       - name: Get container info
         id: container_info
         run: |
-          image_digest="$(docker inspect "${APP_IMAGE_NAME}:latest" --format '{{ index .RepoDigests 0 }}' | awk -F '@' '{ print $2 }')"
+          image_digest="$(docker inspect "${APP_IMAGE_NAME}:${APP_IMAGE_REF}" --format '{{ index .RepoDigests 0 }}' | awk -F '@' '{ print $2 }')"
           echo "::set-output name=image-digest::${image_digest}"
 
   sign:
