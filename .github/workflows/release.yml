@@ -1,69 +1,46 @@
-
-name: Create and publish a api image
+name: goreleaser
 
 on:
   push:
     tags:
-      - v**
-env:
-  REGISTRY: ghcr.io/metal-toolbox
-  API_IMAGE_NAME: audito-maldito/audito-maldito
+      - 'v*.*.*'
 
 jobs:
-  auto-release:
-    name: Create Release
+  goreleaser:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        with:
-          generate_release_notes: true
-
-  build-and-push-image:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+      id-token: write
       packages: write
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@1f401f745bf57e30b3a2800ad308a87d2ebdf14b
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v4.1.1
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get current date
-        id: date
-        run: echo "::set-output name=date::$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta-api
-        uses: docker/metadata-action@62339db73c56dd749060f65a6ebb93a6e056b755
+      -
+        name: Checkout
+        uses: actions/checkout@v4.1.1
         with:
-          images: ${{ env.REGISTRY }}/${{ env.API_IMAGE_NAME }}
-
-      - name: Build rsyslog and push Docker image
-        uses: docker/build-push-action@fdf7f43ecf7c1a5c7afe936410233728a8c2d9c2
+          fetch-depth: 0
+      -
+        name: Set up Go
+        uses: actions/setup-go@v4.1.0
         with:
-          context: "./contrib/rsyslog"
-          push: true
-          file: ./contrib/rsyslog/Dockerfile.ubuntu
-          tags: ${{ env.REGISTRY }}/${{ env.API_IMAGE_NAME }}:${{ github.ref_name }}-rsyslog
-          labels: ${{ steps.meta-api.outputs.labels }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@fdf7f43ecf7c1a5c7afe936410233728a8c2d9c2
+          go-version: 1.19
+      -
+        name: install cosign
+        uses: sigstore/cosign-installer@v3.2.0
+      -
+        uses: anchore/sbom-action/download-syft@v0.14.3
+      -
+        name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v5.0.0
         with:
-          push: true
-          file: Dockerfile
-          tags: ${{ env.REGISTRY }}/${{ env.API_IMAGE_NAME }}:${{ github.ref_name }}
-          labels: ${{ steps.meta-api.outputs.labels }}
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_EXPERIMENTAL: 1
