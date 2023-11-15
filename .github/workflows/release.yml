@@ -6,7 +6,7 @@ on:
       - v**
 env:
   REGISTRY: ghcr.io/vipulagarwal
-  APP_IMAGE_NAME: vipulagarwal/audito-maldito
+  APP_IMAGE_NAME: audito-maldito
   APP_IMAGE_REF: ${{ github.ref_name }}
 
 jobs:
