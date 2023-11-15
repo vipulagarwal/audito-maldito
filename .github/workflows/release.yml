@@ -1,46 +1,109 @@
-name: goreleaser
+name: release
 
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - v**
+env:
+  REGISTRY: ghcr.io/vipulagarwal
+  APP_IMAGE_NAME: vipulagarwal/audito-maldito
 
 jobs:
-  goreleaser:
+  auto-release:
+    name: Create Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
-      packages: write
     steps:
-      -
-        name: Login to GHCR
-        uses: docker/login-action@v3.0.0
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
         with:
-          registry: ghcr.io
+          generate_release_notes: true
+
+  docker:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-digest: ${{ steps.container_info.outputs.image-digest }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@1f401f745bf57e30b3a2800ad308a87d2ebdf14b
+        with:
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      -
-        name: Checkout
-        uses: actions/checkout@v4.1.1
+
+      - name: Get current date
+        id: date
+        run: echo "::set-output name=date::$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta-app
+        uses: docker/metadata-action@62339db73c56dd749060f65a6ebb93a6e056b755
         with:
-          fetch-depth: 0
-      -
-        name: Set up Go
-        uses: actions/setup-go@v4.1.0
+          images: ${{ env.REGISTRY }}/${{ env.APP_IMAGE_NAME }}
+
+      - name: Build rsyslog and push Docker image
+        uses: docker/build-push-action@fdf7f43ecf7c1a5c7afe936410233728a8c2d9c2
         with:
-          go-version: 1.19
-      -
-        name: install cosign
+          context: "./contrib/rsyslog"
+          push: true
+          file: ./contrib/rsyslog/Dockerfile.ubuntu
+          tags: ${{ env.REGISTRY }}/${{ env.APP_IMAGE_NAME }}:${{ github.ref_name }}-rsyslog
+          labels: ${{ steps.meta-app.outputs.labels }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@fdf7f43ecf7c1a5c7afe936410233728a8c2d9c2
+        with:
+          push: true
+          file: Dockerfile
+          tags: ${{ env.REGISTRY }}/${{ env.APP_IMAGE_NAME }}:${{ github.ref_name }}
+          labels: ${{ steps.meta-app.outputs.labels }}
+      
+      - name: Get container info
+        id: container_info
+        run: |
+          image_digest="$(docker inspect "${APP_IMAGE_NAME}:latest" --format '{{ index .RepoDigests 0 }}' | awk -F '@' '{ print $2 }')"
+          echo "::set-output name=image-digest::${image_digest}"
+
+  sign:
+    runs-on: ubuntu-22.04
+    needs: [docker]
+
+    permissions:
+      packages: write
+      id-token: write
+
+    env:
+      IMAGE_DIGEST: ${{ needs.docker.outputs.image-digest }}
+
+    steps:
+      - name: Install cosign
         uses: sigstore/cosign-installer@v3.2.0
-      -
-        uses: anchore/sbom-action/download-syft@v0.14.3
-      -
-        name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v5.0.0
         with:
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          COSIGN_EXPERIMENTAL: 1
+          cosign-release: v2.2.1
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@1f401f745bf57e30b3a2800ad308a87d2ebdf14b
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign image
+        run: |
+          cosign sign "${APP_IMAGE_NAME}@${IMAGE_DIGEST}"
+          echo "::notice title=Verify signature::cosign verify ${APP_IMAGE_NAME}@${IMAGE_DIGEST} | jq '.[0]'"
+          echo "::notice title=Inspect signature bundle::cosign verify ${APP_IMAGE_NAME}@${IMAGE_DIGEST} | jq '.[0].optional.Bundle.Payload.body |= @base64d | .[0].optional.Bundle.Payload.body | fromjson'"
+          echo "::notice title=Inspect certificate::cosign verify ${APP_IMAGE_NAME}@${IMAGE_DIGEST} | jq -r '.[0].optional.Bundle.Payload.body |= @base64d | .[0].optional.Bundle.Payload.body | fromjson | .spec.signature.publicKey.content |= @base64d | .spec.signature.publicKey.content' | openssl x509 -text"
+      
+      
