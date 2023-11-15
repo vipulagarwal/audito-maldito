@@ -73,7 +73,7 @@ jobs:
       - name: Get container info
         id: container_info
         run: |
-          image_digest="$(docker inspect "${APP_IMAGE_NAME}:${APP_IMAGE_REF}" --format '{{ index .RepoDigests 0 }}' | awk -F '@' '{ print $2 }')"
+          image_digest="$(docker inspect "${REGISTRY}/${APP_IMAGE_NAME}:${APP_IMAGE_REF}" --format '{{ index .RepoDigests 0 }}' | awk -F '@' '{ print $2 }')"
           echo "::set-output name=image-digest::${image_digest}"
 
   sign:
